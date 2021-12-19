@@ -18,7 +18,39 @@ var marketTable *tview.Table
 func main() {
 	marketOps = market.New()
 
-	ui = tview.NewApplication()
+	pages := tview.NewPages().AddPage("hauling", renderHaulingPage(), true, true)
+
+	ui = tview.
+		NewApplication().
+		SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyF1:
+				pages.SwitchToPage("hauling")
+			case tcell.KeyF2:
+				pages.SwitchToPage("search")
+			case tcell.KeyF12:
+				ui.Stop()
+			}
+
+			return event
+		})
+
+	appFlex := tview.NewFlex()
+	appFlex.
+		SetDirection(tview.FlexRow).
+		AddItem(pages, 0, 1, true).
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetText("[yellow]F1[-] Hauling\t[yellow]F2[-] Search\t[red]F12[-] Quit"), 1, 0, false)
+
+	// Add headers to the market table, despite it being empty.
+	addMarketTableHeaders()
+
+	// Run the tview application.
+	if err := ui.SetRoot(appFlex, true).EnableMouse(true).Run(); err != nil {
+		panic(err)
+	}
+}
+
+func renderHaulingPage() *tview.Flex {
 	flex := tview.NewFlex()
 
 	searchForm = renderSearchForm()
@@ -27,13 +59,7 @@ func main() {
 	flex.AddItem(searchForm, 35, 0, true)
 	flex.AddItem(marketTable, 0, 1, false)
 
-	// Add headers to the market table, despite it being empty.
-	addMarketTableHeaders()
-
-	// Run the tview application.
-	if err := ui.SetRoot(flex, true).EnableMouse(true).Run(); err != nil {
-		panic(err)
-	}
+	return flex
 }
 
 func renderSearchForm() *tview.Form {
@@ -102,18 +128,17 @@ func renderSearchForm() *tview.Form {
 			searchForm.GetButton(0).SetLabel("Search")
 		}).
 		AddCheckbox("Use Cache", so.UseCache, func(checked bool) { so.UseCache = checked }).
-		AddButton("Quit", func() {
-			ui.Stop()
-		}).
-		SetBorder(true).SetTitle("Market Search").SetTitleAlign(tview.AlignCenter)
+		SetBorder(true).
+		SetTitle("Market Search").
+		SetTitleAlign(tview.AlignCenter)
 
 	return searchForm
 }
 
 func renderMarketTable() *tview.Table {
-	mktTable := tview.NewTable().SetBorders(true)
-
-	return mktTable
+	return tview.
+		NewTable().
+		SetBorders(true)
 }
 
 func addMarketTableHeaders() {
