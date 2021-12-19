@@ -3,6 +3,7 @@ package main
 import (
 	"eve-marketer/internal/market"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/gdamore/tcell/v2"
@@ -65,11 +66,10 @@ func renderHaulingPage() *tview.Flex {
 func renderSearchForm() *tview.Form {
 	so := &market.SearchOptions{
 		RegionId:     10000033,
-		MinProfit:    7000000,
-		ShipCapacity: 1000,
+		MinProfit:    1000000,
+		ShipCapacity: 2500,
 		TaxRate:      8,
-		MultiTrip:    false,
-		UseCache:     true,
+		MaxTrips:     1,
 	}
 
 	searchForm := tview.NewForm()
@@ -99,10 +99,17 @@ func renderSearchForm() *tview.Form {
 				f, _ := strconv.ParseFloat(text, 64)
 				so.ShipCapacity = f
 			}).
-		AddCheckbox("Multi-Trip", so.MultiTrip, func(checked bool) { so.MultiTrip = checked }).
+		AddInputField("Max Trips",
+			strconv.Itoa(int(so.MaxTrips)),
+			3,
+			nil,
+			func(text string) {
+				i, _ := strconv.ParseInt(text, 10, 32)
+				so.MaxTrips = int32(i)
+			}).
 		AddInputField("Tax Rate %",
 			strconv.Itoa(int(so.TaxRate)),
-			0,
+			3,
 			nil,
 			func(text string) {
 				f, _ := strconv.ParseFloat(text, 32)
@@ -122,12 +129,16 @@ func renderSearchForm() *tview.Form {
 			searchForm.GetButton(0).SetLabel("Matching..")
 			ui.ForceDraw()
 
-			matches := marketOps.MatchCriteria(orders, so)
+			matches := marketOps.MatchCriteria(orders, so, func(current, total float64) {
+				percent := math.Floor((current * 100) / total)
+				searchForm.GetButton(0).SetLabel(fmt.Sprintf("Matching (%.0f%%)..", percent))
+				ui.ForceDraw()
+			})
+
 			updateMarketTable(matches)
 
 			searchForm.GetButton(0).SetLabel("Search")
 		}).
-		AddCheckbox("Use Cache", so.UseCache, func(checked bool) { so.UseCache = checked }).
 		SetBorder(true).
 		SetTitle("Market Search").
 		SetTitleAlign(tview.AlignCenter)
