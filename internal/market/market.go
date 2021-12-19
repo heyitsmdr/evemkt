@@ -113,8 +113,9 @@ func (m *Market) MatchCriteria(orders []esi.GetMarketsRegionIdOrders200Ok, so *S
 func (m *Market) compareSellOrder2BuyOrder(sellOrder, buyOrder esi.GetMarketsRegionIdOrders200Ok, so *SearchOptions) *MarketMatch {
 	// Normalize the quantity.
 	normalizedQuantity := math.Min(float64(sellOrder.VolumeRemain), float64(buyOrder.VolumeRemain))
-	if normalizedQuantity > so.ShipCapacity {
-		normalizedQuantity = so.ShipCapacity
+	typeVolume := m.ItemInfo(sellOrder.TypeId).Volume
+	if (normalizedQuantity * float64(typeVolume)) > so.ShipCapacity {
+		normalizedQuantity = math.Floor(so.ShipCapacity / float64(typeVolume))
 	}
 
 	buyISK := normalizedQuantity * sellOrder.Price
