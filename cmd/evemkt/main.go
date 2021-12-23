@@ -1,7 +1,8 @@
 package main
 
 import (
-	"eve-marketer/internal/market"
+	"eve-marketer/internal/eve"
+	search "eve-marketer/internal/pages/search"
 	"fmt"
 	"math"
 	"strconv"
@@ -11,26 +12,33 @@ import (
 )
 
 var ui *tview.Application
-var marketOps *market.Market
 
-var searchForm *tview.Form
 var marketTable *tview.Table
 
 func main() {
-	marketOps = market.New()
+	eve.Init()
 
-	pages := tview.NewPages().AddPage("hauling", renderHaulingPage(), true, true)
+	ui = tview.NewApplication()
 
-	ui = tview.
-		NewApplication().
+	pages := tview.
+		NewPages().
+		AddPage("hauling", renderHaulingPage(), true, true).
+		AddPage("search", search.Render(ui), true, false)
+
+	ui.
 		SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			switch event.Key() {
 			case tcell.KeyF1:
 				pages.SwitchToPage("hauling")
 			case tcell.KeyF2:
 				pages.SwitchToPage("search")
-			case tcell.KeyF12:
+			case tcell.KeyEscape:
 				ui.Stop()
+			case tcell.KeyEnter:
+				currentPage, _ :=  pages.GetFrontPage()
+				if currentPage == "search" {
+					search.ShowSearch()
+				}
 			}
 
 			return event
@@ -40,7 +48,10 @@ func main() {
 	appFlex.
 		SetDirection(tview.FlexRow).
 		AddItem(pages, 0, 1, true).
-		AddItem(tview.NewTextView().SetDynamicColors(true).SetText("[yellow]F1[-] Hauling\t[yellow]F2[-] Search\t[red]F12[-] Quit"), 1, 0, false)
+		AddItem(tview.NewTextView().SetDynamicColors(true).SetText(
+			"[yellow]F1[-] Hauling\t[yellow]F2[-] Search\t[red]ESC[-] Quit"),
+			1, 0, false,
+		)
 
 	// Add headers to the market table, despite it being empty.
 	addMarketTableHeaders()
@@ -52,19 +63,16 @@ func main() {
 }
 
 func renderHaulingPage() *tview.Flex {
-	flex := tview.NewFlex()
-
-	searchForm = renderSearchForm()
 	marketTable = renderMarketTable()
 
-	flex.AddItem(searchForm, 35, 0, true)
-	flex.AddItem(marketTable, 0, 1, false)
-
-	return flex
+	return tview.
+		NewFlex().
+		AddItem(renderHaulingSearchForm(), 35, 0, true).
+		AddItem(marketTable, 0, 1, false)
 }
 
-func renderSearchForm() *tview.Form {
-	so := &market.SearchOptions{
+func renderHaulingSearchForm() (searchForm *tview.Form) {
+	so := &eve.SearchOptions{
 		RegionId:     10000033,
 		MinProfit:    1000000,
 		ShipCapacity: 2500,
@@ -72,7 +80,7 @@ func renderSearchForm() *tview.Form {
 		MaxTrips:     1,
 	}
 
-	searchForm := tview.NewForm()
+	searchForm = tview.NewForm()
 	searchForm.
 		//AddDropDown("Title", []string{"Mr.", "Ms.", "Mrs.", "Dr.", "Prof."}, 0, nil).
 		AddInputField("Region",
@@ -119,7 +127,7 @@ func renderSearchForm() *tview.Form {
 			searchForm.GetButton(0).SetLabel("Searching..")
 			ui.ForceDraw()
 
-			orders := marketOps.FetchAllRegionOrders(
+			orders := eve.FetchAllRegionOrders(
 				so,
 				func(text string) {
 					searchForm.GetButton(0).SetLabel(text)
@@ -129,7 +137,7 @@ func renderSearchForm() *tview.Form {
 			searchForm.GetButton(0).SetLabel("Matching..")
 			ui.ForceDraw()
 
-			matches := marketOps.MatchCriteria(orders, so, func(current, total float64) {
+			matches := eve.MatchCriteria(orders, so, func(current, total float64) {
 				percent := math.Floor((current * 100) / total)
 				searchForm.GetButton(0).SetLabel(fmt.Sprintf("Matching (%.0f%%)..", percent))
 				ui.ForceDraw()
@@ -140,16 +148,21 @@ func renderSearchForm() *tview.Form {
 			searchForm.GetButton(0).SetLabel("Search")
 		}).
 		SetBorder(true).
-		SetTitle("Market Search").
+		SetTitle("EVE Search").
 		SetTitleAlign(tview.AlignCenter)
 
-	return searchForm
+	return
 }
 
-func renderMarketTable() *tview.Table {
-	return tview.
-		NewTable().
-		SetBorders(true)
+func renderMarketTable() (tbl *tview.Table) {
+	tbl = tview.NewTable()
+	tbl.
+		SetBorders(true).
+		SetTitle("Matching Orders").
+		SetBorder(true).
+		SetBorderPadding(1, 1, 1, 1)
+
+	return
 }
 
 func addMarketTableHeaders() {
@@ -169,7 +182,6 @@ func addMarketTableHeaders() {
 		SetCell(0, 12, tview.NewTableCell("Profit").SetTextColor(tcell.ColorGreen).SetAlign(tview.AlignLeft)).
 		SetCell(0, 13, tview.NewTableCell("Profit/jump").SetTextColor(tcell.ColorGreen).SetAlign(tview.AlignLeft)).
 		SetSelectable(true, false).
-		Select(0, 0).SetFixed(1, 1).
 		SetDoneFunc(func(key tcell.Key) {
 			if key == tcell.KeyEscape {
 				ui.Stop()
@@ -179,23 +191,23 @@ func addMarketTableHeaders() {
 			marketTable.GetCell(row, column).SetTextColor(tcell.ColorRed)
 		})
 }
-func updateMarketTable(matches []market.MarketMatch) {
+func updateMarketTable(matches []eve.MarketMatch) {
 	marketTable.Clear()
 	addMarketTableHeaders()
 
 	for i, match := range matches {
 		row := i + 1
 
-		marketTable.SetCell(row, 0, tview.NewTableCell(marketOps.ItemInfo(match.SellOrder.TypeId).Name))
-		marketTable.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%.2f m³", marketOps.ItemInfo(match.SellOrder.TypeId).Volume)))
+		marketTable.SetCell(row, 0, tview.NewTableCell(eve.ItemInfo(match.SellOrder.TypeId).Name))
+		marketTable.SetCell(row, 1, tview.NewTableCell(fmt.Sprintf("%.2f m³", eve.ItemInfo(match.SellOrder.TypeId).Volume)))
 
 		marketTable.SetCell(row, 2, tview.NewTableCell(match.SellOrderPrice).SetTextColor(tcell.ColorBlueViolet))
 		marketTable.SetCell(row, 3, tview.NewTableCell(fmt.Sprintf("%d", match.SellOrder.VolumeRemain)).SetTextColor(tcell.ColorBlueViolet))
-		marketTable.SetCell(row, 4, tview.NewTableCell(fmt.Sprintf("%s", marketOps.StationInfo(match.SellOrder.LocationId).Name)).SetTextColor(tcell.ColorBlueViolet))
+		marketTable.SetCell(row, 4, tview.NewTableCell(fmt.Sprintf("%s", eve.StationInfo(match.SellOrder.LocationId).Name)).SetTextColor(tcell.ColorBlueViolet))
 
 		marketTable.SetCell(row, 5, tview.NewTableCell(match.BuyOrderPrice).SetTextColor(tcell.ColorSpringGreen))
 		marketTable.SetCell(row, 6, tview.NewTableCell(fmt.Sprintf("%d", match.BuyOrder.VolumeRemain)).SetTextColor(tcell.ColorSpringGreen))
-		marketTable.SetCell(row, 7, tview.NewTableCell(fmt.Sprintf("%s", marketOps.StationInfo(match.BuyOrder.LocationId).Name)).SetTextColor(tcell.ColorSpringGreen))
+		marketTable.SetCell(row, 7, tview.NewTableCell(fmt.Sprintf("%s", eve.StationInfo(match.BuyOrder.LocationId).Name)).SetTextColor(tcell.ColorSpringGreen))
 
 		marketTable.SetCell(row, 8, tview.NewTableCell(fmt.Sprintf("%.2f", match.MoveQuantity)))
 		marketTable.SetCell(row, 9, tview.NewTableCell(fmt.Sprintf("%.0f m³", match.MoveVolumeTotal)))

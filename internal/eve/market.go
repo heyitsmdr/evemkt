@@ -1,4 +1,4 @@
-package market
+package eve
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/peterbourgon/diskv/v3"
 )
 
-type Market struct {
+type EVE struct {
 	EVE        *goesi.APIClient
 	Cache      *diskv.Diskv
 	Accounting accounting.Accounting
@@ -43,13 +43,15 @@ type MarketMatch struct {
 	Jumps           int
 }
 
-func New() *Market {
+var eve *EVE
+
+func Init() {
 	transport := httpcache.NewTransport(diskcache.New("cache-data"))
 	transport.Transport = &http.Transport{Proxy: http.ProxyFromEnvironment}
 	httpClient := &http.Client{Transport: transport}
 
-	m := &Market{
-		EVE: goesi.NewAPIClient(httpClient, "evemkt - An EVE Market CLI; Created by <Atticus Windstorm>"),
+	eve = &EVE{
+		EVE: goesi.NewAPIClient(httpClient, "evemkt - An EVE EVE CLI; Created by <Atticus Windstorm>"),
 		Cache: diskv.New(diskv.Options{
 			BasePath:     "eve-marketer-data",
 			Transform:    func(s string) []string { return []string{} },
@@ -57,15 +59,13 @@ func New() *Market {
 		}),
 		Accounting: accounting.Accounting{Symbol: "$", Precision: 2},
 	}
-
-	return m
 }
 
-func (m *Market) FetchAllRegionOrders(so *SearchOptions, updateLabelFunc func(string)) (orders []esi.GetMarketsRegionIdOrders200Ok) {
+func FetchAllRegionOrders(so *SearchOptions, updateLabelFunc func(string)) (orders []esi.GetMarketsRegionIdOrders200Ok) {
 	page := 1
 	for {
 		updateLabelFunc(fmt.Sprintf("Fetching %d..", page))
-		o, _, err := m.EVE.ESI.MarketApi.GetMarketsRegionIdOrders(
+		o, _, err := eve.EVE.ESI.MarketApi.GetMarketsRegionIdOrders(
 			context.Background(),
 			"",
 			so.RegionId,
@@ -81,7 +81,7 @@ func (m *Market) FetchAllRegionOrders(so *SearchOptions, updateLabelFunc func(st
 	return
 }
 
-func (m *Market) MatchCriteria(orders []esi.GetMarketsRegionIdOrders200Ok, so *SearchOptions, updateProgress func(float64, float64)) (mm []MarketMatch) {
+func MatchCriteria(orders []esi.GetMarketsRegionIdOrders200Ok, so *SearchOptions, updateProgress func(float64, float64)) (mm []MarketMatch) {
 	ordersMap := make(map[int32]map[string][]esi.GetMarketsRegionIdOrders200Ok)
 
 	for _, o := range orders {
@@ -104,7 +104,7 @@ func (m *Market) MatchCriteria(orders []esi.GetMarketsRegionIdOrders200Ok, so *S
 		updateProgress(float64(count), float64(len(ordersMap)))
 		for _, sellOrder := range orders["sellOrders"] {
 			for _, buyOrder := range orders["buyOrders"] {
-				if isMatch := m.compareSellOrder2BuyOrder(sellOrder, buyOrder, so); isMatch != nil {
+				if isMatch := compareSellOrder2BuyOrder(sellOrder, buyOrder, so); isMatch != nil {
 					mm = append(mm, *isMatch)
 				}
 			}
@@ -116,10 +116,10 @@ func (m *Market) MatchCriteria(orders []esi.GetMarketsRegionIdOrders200Ok, so *S
 	return
 }
 
-func (m *Market) compareSellOrder2BuyOrder(sellOrder, buyOrder esi.GetMarketsRegionIdOrders200Ok, so *SearchOptions) *MarketMatch {
+func compareSellOrder2BuyOrder(sellOrder, buyOrder esi.GetMarketsRegionIdOrders200Ok, so *SearchOptions) *MarketMatch {
 	// Normalize the quantity.
 	normalizedQuantity := math.Min(float64(sellOrder.VolumeRemain), float64(buyOrder.VolumeRemain))
-	typeVolume := m.ItemInfo(sellOrder.TypeId).Volume
+	typeVolume := ItemInfo(sellOrder.TypeId).Volume
 	if (normalizedQuantity * float64(typeVolume)) > so.ShipCapacity {
 		normalizedQuantity = math.Floor(so.ShipCapacity / float64(typeVolume))
 	}
@@ -129,58 +129,22 @@ func (m *Market) compareSellOrder2BuyOrder(sellOrder, buyOrder esi.GetMarketsReg
 	profit := sellISK - buyISK
 
 	if profit > float64(so.MinProfit) {
-		jumps := len(m.RouteInfo(sellOrder.SystemId, buyOrder.SystemId))
+		jumps := len(RouteInfo(sellOrder.SystemId, buyOrder.SystemId))
 
 		return &MarketMatch{
 			BuyOrder:        buyOrder,
 			SellOrder:       sellOrder,
-			BuyOrderPrice:   m.Accounting.FormatMoney(buyOrder.Price),
-			SellOrderPrice:  m.Accounting.FormatMoney(sellOrder.Price),
+			BuyOrderPrice:   eve.Accounting.FormatMoney(buyOrder.Price),
+			SellOrderPrice:  eve.Accounting.FormatMoney(sellOrder.Price),
 			MoveQuantity:    normalizedQuantity,
-			MoveVolumeTotal: float64(m.ItemInfo(sellOrder.TypeId).Volume) * normalizedQuantity,
-			BuyISK:          m.Accounting.FormatMoney(buyISK),
-			SellISK:         m.Accounting.FormatMoney(sellISK),
-			Profit:          m.Accounting.FormatMoney(profit),
+			MoveVolumeTotal: float64(ItemInfo(sellOrder.TypeId).Volume) * normalizedQuantity,
+			BuyISK:          eve.Accounting.FormatMoney(buyISK),
+			SellISK:         eve.Accounting.FormatMoney(sellISK),
+			Profit:          eve.Accounting.FormatMoney(profit),
 			Jumps:           jumps,
-			ProfitPerJump:   m.Accounting.FormatMoney(profit / float64(jumps)),
+			ProfitPerJump:   eve.Accounting.FormatMoney(profit / float64(jumps)),
 		}
 	}
 
 	return nil
-}
-
-func (m *Market) ItemInfo(itemId int32) esi.GetUniverseTypesTypeIdOk {
-	item, _, err := m.EVE.ESI.UniverseApi.GetUniverseTypesTypeId(context.Background(), itemId, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return item
-}
-
-func (m *Market) SystemInfo(systemId int32) esi.GetUniverseSystemsSystemIdOk {
-	sys, _, err := m.EVE.ESI.UniverseApi.GetUniverseSystemsSystemId(context.Background(), systemId, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return sys
-}
-
-func (m *Market) StationInfo(stationId int64) esi.GetUniverseStationsStationIdOk {
-	station, _, err := m.EVE.ESI.UniverseApi.GetUniverseStationsStationId(context.Background(), int32(stationId), nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return station
-}
-
-func (m *Market) RouteInfo(sourceId, destinationId int32) []int32 {
-	routes, _, err := m.EVE.ESI.RoutesApi.GetRouteOriginDestination(context.Background(), destinationId, sourceId, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	return routes
 }
